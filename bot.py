@@ -130,16 +130,43 @@ Jobs to analyze:
         print(f"Batch AI Error: {e}", flush=True)
         return [{"summary": "⚠️ مشکل در هوش مصنوعی", "skills": "نامشخص", "budget": "نامشخص"} for _ in jobs]
 
+import random
+
 @bot.message_handler(func=lambda message: "جستجوی" in message.text)
-def handle_instant_scrape(message):
+def ask_search_subreddit(message):
     chat_id = str(message.chat.id)
     save_user(chat_id)
-    bot.send_message(chat_id, "🔍 در حال شخم زدن ساب‌ردیت‌ها برای یافتن پروژه‌های مرتبط... ⏳", reply_markup=get_main_keyboard())
     
+    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+    buttons = [telebot.types.InlineKeyboardButton(f"r/{sub}", callback_data=f"search_{sub}") for sub in SUBREDDITS]
+    markup.add(*buttons)
+    markup.add(telebot.types.InlineKeyboardButton("جستجو در همه ساب‌ردیت‌ها (ترکیبی) 🎲", callback_data="search_ALL"))
+    
+    bot.send_message(chat_id, "🔍 مایل هستید در کدام ساب‌ردیت جستجو کنم؟", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("search_"))
+def process_search_selection(call):
+    target_sub = call.data.split("_")[1]
+    chat_id = str(call.message.chat.id)
+    
+    bot.answer_callback_query(call.id)
+    bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+    
+    if target_sub == "ALL":
+        bot.send_message(chat_id, "🔍 در حال شخم زدن تمام ساب‌ردیت‌ها برای یافتن ۵ پروژه... ⏳")
+        subs_to_search = list(SUBREDDITS)
+        random.shuffle(subs_to_search)
+    else:
+        bot.send_message(chat_id, f"🔍 در حال جستجوی ۵ پروژه جدید در r/{target_sub}... ⏳")
+        subs_to_search = [target_sub]
+        
+    threading.Thread(target=execute_instant_search, args=(chat_id, subs_to_search), daemon=True).start()
+
+def execute_instant_search(chat_id, subs_to_search):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'}
     found_entries = []
     
-    for sub in SUBREDDITS:
+    for sub in subs_to_search:
         if len(found_entries) >= 5:
             break
             
@@ -165,7 +192,7 @@ def handle_instant_scrape(message):
             print(f"Error fetching {sub}: {e}")
 
     if not found_entries:
-        bot.send_message(chat_id, "حتی در صدها پست اخیر ساب‌ردیت‌ها هم پروژه مرتبطی با تخصص شما یافت نشد! 😔")
+        bot.send_message(chat_id, "حتی در پست‌های اخیر هم پروژه مرتبطی با تخصص شما یافت نشد! 😔")
         return
 
     bot.send_message(chat_id, f"✅ تعداد {len(found_entries)} پروژه پیدا شد. در حال ارسال یک‌جای همه پروژه‌ها به جمینای برای تحلیلِ دسته‌جمعی... ⚡")
@@ -177,7 +204,6 @@ def handle_instant_scrape(message):
     for idx, (entry, sub) in enumerate(found_entries):
         pub_date = getattr(entry, 'published', 'نامشخص')
         
-        # safely get AI result
         try:
             ai_data = ai_results[idx]
             ai_analysis = f"🔹 <b>خلاصه کار:</b> {ai_data.get('summary', 'نامشخص')}\n🛠 <b>مهارت‌های مورد نیاز:</b> {ai_data.get('skills', 'نامشخص')}\n💰 <b>بودجه:</b> {ai_data.get('budget', 'نامشخص')}"
