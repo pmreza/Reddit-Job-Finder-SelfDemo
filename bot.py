@@ -73,6 +73,12 @@ def get_main_keyboard():
     markup.row("📋 ساب‌ردیت‌های تحت نظر")
     return markup
 
+def get_apply_keyboard():
+    markup = telebot.types.InlineKeyboardMarkup()
+    btn = telebot.types.InlineKeyboardButton("✉️ نوشتن پیشنهاد (Cover Letter)", callback_data="generate_cover_letter")
+    markup.add(btn)
+    return markup
+
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = str(message.chat.id)
@@ -181,10 +187,39 @@ def handle_instant_scrape(message):
         msg += f"{ai_analysis}\n\n"
         msg += f"🔗 <b>لینک:</b>\n{entry.link}"
         try:
-            bot.send_message(chat_id, msg, parse_mode="HTML", disable_web_page_preview=True)
+            bot.send_message(chat_id, msg, parse_mode="HTML", disable_web_page_preview=True, reply_markup=get_apply_keyboard())
             time.sleep(1.5)
         except Exception:
             pass
+
+@bot.callback_query_handler(func=lambda call: call.data == "generate_cover_letter")
+def handle_cover_letter(call):
+    bot.answer_callback_query(call.id, "در حال نوشتن پیام... ⏳")
+    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    
+    processing_msg = bot.send_message(call.message.chat.id, "✍️ <b>جمینای در حال نوشتن بهترین کاورلتر برای این پروژه است...</b>", parse_mode="HTML")
+    
+    prompt = f"""
+شما یک فریلنسر حرفه‌ای هستید.
+یک پیام دایرکت (DM) یا کاورلتر کوتاه، جذاب و بسیار حرفه‌ای به زبان انگلیسی برای کارفرمای این آگهی کار بنویسید.
+نکات مهم:
+- پیام باید نهایتاً ۳ پاراگراف کوتاه باشد.
+- مستقیم سر اصل مطلب بروید و نشان دهید که مشکلشان را می‌فهمید.
+- جای خالی برای قرار دادن لینک پورتفولیو در متن بگذارید مانند [Link to my portfolio/website].
+- لحن: حرفه‌ای، بااعتمادبه‌نفس و دوستانه.
+
+این اطلاعات آگهی است که کاربر برای آن درخواست می‌دهد:
+{call.message.text}
+"""
+    try:
+        response = ai_model.generate_content(prompt)
+        cover_letter = response.text.strip()
+        
+        reply_text = f"✉️ <b>کاورلتر آماده برای ارسال:</b>\n\n<code>{cover_letter}</code>\n\n(متن بالا را کپی کنید، لینک‌های خودتان را جایگزین کنید و برای کارفرما بفرستید)"
+        bot.edit_message_text(reply_text, chat_id=call.message.chat.id, message_id=processing_msg.message_id, parse_mode="HTML")
+    except Exception as e:
+        print(f"Gemini error in cover letter: {e}")
+        bot.edit_message_text("⚠️ متاسفانه در ارتباط با هوش مصنوعی برای نوشتن کاورلتر مشکلی پیش آمد. لطفا چند ثانیه صبر کنید و دوباره تلاش کنید.", chat_id=call.message.chat.id, message_id=processing_msg.message_id)
 
 def get_comment_count(post_url):
     if not post_url.endswith('.json'):
@@ -214,10 +249,13 @@ Title: {title}
 Description: {description}
 """
     try:
+        # Prevent Gemini Rate limits when analyzing multiple jobs fast
+        time.sleep(1)
         response = ai_model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:
-        return "⚠️ مشکل در ارتباط با هوش مصنوعی."
+        print(f"Gemini Error in analysis: {e}")
+        return "⚠️ مشکل در ارتباط با هوش مصنوعی. (ممکن است بخاطر محدودیت درخواست API باشد)"
 
 def check_reddit_jobs():
     while True:
@@ -267,7 +305,7 @@ def check_reddit_jobs():
                         
                         for chat_id in users:
                             try:
-                                bot.send_message(chat_id, msg, parse_mode="HTML", disable_web_page_preview=True)
+                                bot.send_message(chat_id, msg, parse_mode="HTML", disable_web_page_preview=True, reply_markup=get_apply_keyboard())
                             except Exception:
                                 pass
                                 
