@@ -26,157 +26,81 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN)
 genai.configure(api_key=GEMINI_API_KEY)
 ai_model = genai.GenerativeModel('gemini-1.5-flash')
 
-DB_FILE = "users_db.json"
 SEEN_FILE = "seen_jobs.txt"
-SUBS_FILE = "subreddits.json"
-DEFAULT_SUBS = ['slavelabour', 'forhire', 'DoneDirtCheap', 'javascriptjobs']
+USERS_FILE = "chat_ids.txt"
 
-CATEGORIES = {
-    "frontend": ["react", "vue", "angular", "javascript", "html", "css", "tailwind", "next", "frontend", "front-end"],
-    "backend": ["python", "django", "node", "express", "sql", "postgres", "mongodb", "fastapi", "backend", "back-end", ".net", "c#"],
-    "fullstack": ["fullstack", "full-stack", "mern", "django", "react"],
-    "design": ["figma", "ui", "ux", "design", "photoshop", "illustrator"]
-}
+SUBREDDITS = [
+    'slavelabour', 'forhire', 'DoneDirtCheap', 'javascriptjobs',
+    'freelance_forhire', 'remotejs', 'hiring', 'freelance',
+    'DesignJobs', 'webdevjobs', 'UIUX', 'gameDevClassifieds', 'Jobs4Bitcoins'
+]
 
-category_names = {
-    "frontend": "برنامه‌نویسی فرانت‌اند",
-    "backend": "برنامه‌نویسی بک‌اند",
-    "fullstack": "توسعه فول‌استک",
-    "design": "طراحی وب و UI/UX"
-}
+KEYWORDS = [
+    "react", "vue", "angular", "javascript", "html", "css", "tailwind", "next", 
+    "frontend", "front-end", "python", "django", "node", "express", "sql", 
+    "postgres", "mongodb", "fastapi", "backend", "back-end", ".net", "c#", 
+    "fullstack", "full-stack", "mern", "figma", "ui", "ux", "design", 
+    "photoshop", "illustrator", "app", "mobile", "react native", "flutter",
+    "web", "website", "developer", "programmer"
+]
 
-def load_db():
-    if not os.path.exists(DB_FILE):
-        return {}
-    with open(DB_FILE, "r") as f:
-        return json.load(f)
+def load_users():
+    if not os.path.exists(USERS_FILE):
+        return set()
+    with open(USERS_FILE, "r") as f:
+        return set(line.strip() for line in f if line.strip())
 
-def save_db(db):
-    with open(DB_FILE, "w") as f:
-        json.dump(db, f)
+def save_user(chat_id):
+    users = load_users()
+    if chat_id not in users:
+        with open(USERS_FILE, "a") as f:
+            f.write(f"{chat_id}\n")
 
 def load_seen_jobs():
     if not os.path.exists(SEEN_FILE):
         return set()
     with open(SEEN_FILE, "r") as f:
-        return set(line.strip() for line in f)
+        return set(line.strip() for line in f if line.strip())
 
 def save_seen_job(job_id):
     with open(SEEN_FILE, "a") as f:
         f.write(f"{job_id}\n")
 
-def load_subs():
-    if not os.path.exists(SUBS_FILE):
-        return DEFAULT_SUBS
-    with open(SUBS_FILE, 'r', encoding='utf-8') as f:
-        try:
-            return json.load(f)
-        except json.JSONDecodeError:
-            return DEFAULT_SUBS
-
-def save_subs(subs):
-    with open(SUBS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(subs, f, indent=4)
-
 def get_main_keyboard():
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("🔍 جستجوی فوری (۳ پست آخر)")
-    markup.row("➕ افزودن ساب‌ردیت", "📋 لیست ساب‌ردیت‌ها")
-    markup.row("⚙️ تغییر تخصص")
+    markup.row("🔍 جستجوی پروژه‌های جدید (۱۰ مورد)")
+    markup.row("📋 ساب‌ردیت‌های تحت نظر")
     return markup
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    markup = telebot.types.InlineKeyboardMarkup()
-    for key, name in category_names.items():
-        markup.add(telebot.types.InlineKeyboardButton(name, callback_data=f"cat_{key}"))
-    
+    chat_id = str(message.chat.id)
+    save_user(chat_id)
     bot.send_message(
-        message.chat.id,
+        chat_id,
         "سلام! 👋 به ربات هوشمند کاریابی ردیت خوش آمدید.\n\n"
-        "لطفاً تخصص خود را از لیست زیر انتخاب کنید:",
-        reply_markup=markup
-    )
-    bot.send_message(
-        message.chat.id,
-        "برای دسترسی سریع به امکانات، از دکمه‌های پایین استفاده کنید:",
+        "این ربات به صورت خودکار پست‌های استخدامی ردیت در زمینه‌های توسعه وب، اپلیکیشن و طراحی UI/UX را مانیتور می‌کند و پروژه‌های جدید را با استفاده از هوش مصنوعی برای شما تحلیل می‌کند.\n\n"
+        "از دکمه‌های پایین استفاده کنید:",
         reply_markup=get_main_keyboard()
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('cat_'))
-def handle_category_selection(call):
-    category = call.data.split('_')[1]
-    chat_id = str(call.message.chat.id)
-    
-    db = load_db()
-    db[chat_id] = category
-    save_db(db)
-    
-    bot.edit_message_text(
-        f"✅ تخصص شما روی **{category_names[category]}** تنظیم شد!",
-        chat_id=chat_id,
-        message_id=call.message.message_id,
-        parse_mode="Markdown"
-    )
-
-@bot.message_handler(commands=['addsub'])
-def add_subreddit_cmd(message):
-    parts = message.text.split()
-    if len(parts) < 2:
-        bot.send_message(message.chat.id, "⚠️ لطفاً نام ساب‌ردیت را بنویسید. مثال:\n`/addsub pythonjobs`", parse_mode="Markdown")
-        return
-    process_add_sub_string(message.chat.id, parts[1])
-
-def process_add_sub_string(chat_id, sub_name):
-    new_sub = sub_name.replace('r/', '').strip()
-    subs = load_subs()
-    if new_sub not in subs:
-        subs.append(new_sub)
-        save_subs(subs)
-        bot.send_message(chat_id, f"✅ ساب‌ردیت **r/{new_sub}** به لیست جستجو اضافه شد.", parse_mode="Markdown")
-    else:
-        bot.send_message(chat_id, "این ساب‌ردیت از قبل در لیست وجود دارد.")
-
-@bot.message_handler(commands=['listsubs'])
+@bot.message_handler(func=lambda message: message.text == "📋 ساب‌ردیت‌های تحت نظر")
 def list_subreddits_cmd(message):
-    subs = load_subs()
-    msg = "📋 **لیست ساب‌ردیت‌های فعال:**\n\n"
-    for s in subs:
+    msg = "📋 **لیست ساب‌ردیت‌هایی که هم‌اکنون در حال جستجو هستند:**\n\n"
+    for s in SUBREDDITS:
         msg += f"🔹 r/{s}\n"
     bot.send_message(message.chat.id, msg, parse_mode="Markdown")
 
-@bot.message_handler(func=lambda message: message.text == "⚙️ تغییر تخصص")
-def btn_change_specialty(message):
-    send_welcome(message)
-
-@bot.message_handler(func=lambda message: message.text == "📋 لیست ساب‌ردیت‌ها")
-def btn_list_subs(message):
-    list_subreddits_cmd(message)
-
-@bot.message_handler(func=lambda message: message.text == "➕ افزودن ساب‌ردیت")
-def btn_add_sub(message):
-    msg = bot.send_message(message.chat.id, "لطفاً نام ساب‌ردیت جدید را تایپ کنید (بدون r/):", reply_markup=telebot.types.ReplyKeyboardRemove())
-    bot.register_next_step_handler(msg, step_add_sub)
-
-def step_add_sub(message):
-    process_add_sub_string(message.chat.id, message.text)
-    bot.send_message(message.chat.id, "بازگشت به منوی اصلی", reply_markup=get_main_keyboard())
-
-@bot.message_handler(func=lambda message: "جستجوی فوری" in message.text)
+@bot.message_handler(func=lambda message: "جستجوی" in message.text)
 def handle_instant_scrape(message):
     chat_id = str(message.chat.id)
-    bot.send_message(chat_id, "در حال جستجوی عمیق برای پیدا کردن ۱۰ پست مرتبط... (این کار ممکن است کمی طول بکشد) ⏳", reply_markup=get_main_keyboard())
+    save_user(chat_id)
+    bot.send_message(chat_id, "در حال جستجوی عمیق در ردیت برای پیدا کردن ۱۰ پست مرتبط با تخصص‌های شما... (این کار ممکن است کمی طول بکشد) ⏳", reply_markup=get_main_keyboard())
     
-    db = load_db()
-    category = db.get(chat_id, "frontend")
-    keywords = CATEGORIES.get(category, [])
-    
-    current_subs = load_subs()
     headers = {'User-Agent': 'Mozilla/5.0'}
-    
     found_entries = []
     
-    for sub in current_subs:
+    for sub in SUBREDDITS:
         if len(found_entries) >= 10:
             break
             
@@ -198,8 +122,7 @@ def handle_instant_scrape(message):
                         continue
                         
                     search_text = title + " " + desc
-                    if any(kw in search_text for kw in keywords):
-                        # Construct a mock entry object to match previous logic
+                    if any(kw in search_text for kw in KEYWORDS):
                         class MockEntry:
                             def __init__(self, t, d, l):
                                 self.title = t
@@ -222,7 +145,7 @@ def handle_instant_scrape(message):
     bot.send_message(chat_id, f"✅ تعداد {len(found_entries)} پست مرتبط پیدا شد. در حال تحلیل توسط هوش مصنوعی...")
     
     for entry, sub, comments in found_entries:
-        ai_analysis = analyze_with_ai(entry.title, entry.summary, category)
+        ai_analysis = analyze_with_ai(entry.title, entry.summary)
         
         msg = f"🧪 **[جستجوی عمیق]**\n\n"
         msg += f"📌 **ساب‌ردیت:** r/{sub}\n"
@@ -232,7 +155,7 @@ def handle_instant_scrape(message):
         msg += f"🔗 **لینک:**\n{entry.link}"
         try:
             bot.send_message(chat_id, msg, parse_mode="Markdown", disable_web_page_preview=True)
-            time.sleep(1) # Prevent Telegram rate limits
+            time.sleep(1.5)
         except Exception:
             pass
 
@@ -252,12 +175,12 @@ def get_comment_count(post_url):
         pass
     return "نامشخص"
 
-def analyze_with_ai(title, description, category):
+def analyze_with_ai(title, description):
     prompt = f"""
 این یک درخواست کار از ردیت است.
-خروجی را دقیقاً با این فرمت بفرست (فقط همین متن):
-🔹 **خلاصه کار:** (یک جمله کوتاه)
-🛠 **مهارت‌های مورد نیاز:** (لیست تکنولوژی‌ها)
+خروجی را دقیقاً با این فرمت بفرست (فقط همین متن را بفرست):
+🔹 **خلاصه کار:** (یک جمله کوتاه درباره نیاز کارفرما)
+🛠 **مهارت‌های مورد نیاز:** (لیست تکنولوژی‌های مهم)
 💰 **بودجه:** (اگر ذکر شده بنویس، وگرنه بنویس 'ذکر نشده')
 
 Title: {title}
@@ -271,16 +194,15 @@ Description: {description}
 
 def check_reddit_jobs():
     while True:
-        db = load_db()
-        if not db:
+        users = load_users()
+        if not users:
             time.sleep(10)
             continue
             
         seen_jobs = load_seen_jobs()
         headers = {'User-Agent': 'Mozilla/5.0'}
         
-        current_subs = load_subs()
-        for sub in current_subs:
+        for sub in SUBREDDITS:
             url = f"https://www.reddit.com/r/{sub}/new.rss"
             try:
                 response = requests.get(url, headers=headers)
@@ -302,25 +224,23 @@ def check_reddit_jobs():
                     
                     search_text = title + " " + desc
                     
-                    for chat_id, category in list(db.items()):
-                        keywords = CATEGORIES.get(category, [])
-                        if any(kw in search_text for kw in keywords):
-                            comments = get_comment_count(entry.link)
-                            ai_analysis = analyze_with_ai(entry.title, entry.summary, category)
-                            
-                            msg = f"🚀 **پروژه جدید یافت شد!**\n\n"
-                            msg += f"📌 **ساب‌ردیت:** r/{sub}\n"
-                            msg += f"📋 **عنوان:** {entry.title}\n"
-                            msg += f"👥 **تعداد رقبا (کامنت‌ها):** {comments} نفر\n\n"
-                            msg += f"{ai_analysis}\n\n"
-                            msg += f"🔗 **لینک:**\n{entry.link}"
-                            
+                    if any(kw in search_text for kw in KEYWORDS):
+                        comments = get_comment_count(entry.link)
+                        ai_analysis = analyze_with_ai(entry.title, entry.summary)
+                        
+                        msg = f"🚀 **پروژه جدید یافت شد!**\n\n"
+                        msg += f"📌 **ساب‌ردیت:** r/{sub}\n"
+                        msg += f"📋 **عنوان:** {entry.title}\n"
+                        msg += f"👥 **تعداد رقبا (کامنت‌ها):** {comments} نفر\n\n"
+                        msg += f"{ai_analysis}\n\n"
+                        msg += f"🔗 **لینک:**\n{entry.link}"
+                        
+                        for chat_id in users:
                             try:
                                 bot.send_message(chat_id, msg, parse_mode="Markdown", disable_web_page_preview=True)
                             except Exception:
                                 pass
-                            break
-                            
+                                
                     seen_jobs.add(job_id)
                     save_seen_job(job_id)
                         
