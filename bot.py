@@ -5,7 +5,6 @@ import threading
 import requests
 import feedparser
 import telebot
-import google.generativeai as genai
 import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -21,11 +20,9 @@ def load_env():
 
 env = load_env()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN") or env.get("TELEGRAM_TOKEN", "")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or env.get("GEMINI_API_KEY", "")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY") or env.get("GROQ_API_KEY", "")
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-genai.configure(api_key=GEMINI_API_KEY)
-ai_model = genai.GenerativeModel('gemini-3.5-flash-lite')
 
 SEEN_FILE = "seen_jobs.txt"
 USERS_FILE = "chat_ids.txt"
@@ -116,21 +113,37 @@ Jobs to analyze:
         prompt += f"--- Job {i} ---\nTitle: {job['title']}\nDesc: {job['desc'][:500]}\n\n"
         
     try:
-        response = ai_model.generate_content(prompt)
-        text = response.text.strip()
+        if not GROQ_API_KEY:
+            raise Exception("توکن Groq تنظیم نشده است.")
+            
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": "llama-3.1-70b-versatile",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2
+        }
+        
+        response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=data, timeout=30)
+        response.raise_for_status()
+        
+        text = response.json()['choices'][0]['message']['content'].strip()
+        
         if text.startswith("```json"): text = text[7:-3].strip()
         if text.startswith("```"): text = text[3:-3].strip()
+        
         results = json.loads(text)
         
-        # Ensure we return a list of exactly the same length
         while len(results) < len(jobs):
             results.append({"summary": "نامشخص", "skills": "نامشخص", "budget": "نامشخص"})
         return results
     except Exception as e:
-        print(f"Batch AI Error: {e}", flush=True)
+        print(f"Batch AI Error (Groq): {e}", flush=True)
         error_msg = str(e).lower()
         if "quota" in error_msg or "429" in error_msg:
-            friendly_err = "⏳ محدودیت درخواست گوگل! (سقف مجاز پر شده است). لطفاً چند دقیقه دیگر تست کنید."
+            friendly_err = "⏳ محدودیت درخواست Groq پر شده است. لطفاً چند دقیقه دیگر تست کنید."
         else:
             friendly_err = f"⚠️ ارور در سرور: {str(e).replace('<', '').replace('>', '')[:100]}"
         return [{"summary": friendly_err, "skills": "نامشخص", "budget": "نامشخص"} for _ in jobs]
@@ -250,17 +263,32 @@ def handle_cover_letter(call):
 {call.message.text}
 """
     try:
-        response = ai_model.generate_content(prompt)
-        cover_letter = response.text.strip()
+        if not GROQ_API_KEY:
+            raise Exception("توکن Groq تنظیم نشده است.")
+            
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": "llama-3.1-70b-versatile",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.5
+        }
+        
+        response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=data, timeout=30)
+        response.raise_for_status()
+        
+        cover_letter = response.json()['choices'][0]['message']['content'].strip()
         safe_cover_letter = html.escape(cover_letter)
         
         reply_text = f"✉️ <b>کاورلتر آماده برای ارسال:</b>\n\n<code>{safe_cover_letter}</code>\n\n(متن بالا را کپی کنید، لینک‌های خودتان را جایگزین کنید و برای کارفرما بفرستید)"
         bot.edit_message_text(reply_text, chat_id=call.message.chat.id, message_id=processing_msg.message_id, parse_mode="HTML")
     except Exception as e:
-        error_msg = str(e)
-        print(f"Gemini error in cover letter: {error_msg}", flush=True)
-        if "429" in error_msg or "Quota" in error_msg:
-            bot.edit_message_text("⏳ <b>گوگل به دلیل درخواست‌های پشت‌سرهم، دسترسی را موقتاً محدود کرده است (فقط 5 درخواست در دقیقه مجاز است).</b>\nلطفاً ۳۰ ثانیه دیگر دوباره امتحان کنید.", chat_id=call.message.chat.id, message_id=processing_msg.message_id, parse_mode="HTML")
+        error_msg = str(e).lower()
+        print(f"Cover Letter Error (Groq): {error_msg}", flush=True)
+        if "429" in error_msg or "quota" in error_msg:
+            bot.edit_message_text("⏳ <b>سرور Groq به دلیل درخواست‌های زیاد شلوغ است.</b>\nلطفاً ۳۰ ثانیه دیگر دوباره امتحان کنید.", chat_id=call.message.chat.id, message_id=processing_msg.message_id, parse_mode="HTML")
         else:
             bot.edit_message_text("⚠️ متاسفانه در ارتباط با هوش مصنوعی مشکلی پیش آمد.", chat_id=call.message.chat.id, message_id=processing_msg.message_id)
 
@@ -314,7 +342,7 @@ def check_reddit_jobs():
                     ai_data = ai_results[idx]
                     ai_analysis = f"🔹 <b>خلاصه کار:</b> {ai_data.get('summary', 'نامشخص')}\n🛠 <b>مهارت‌های مورد نیاز:</b> {ai_data.get('skills', 'نامشخص')}\n💰 <b>بودجه:</b> {ai_data.get('budget', 'نامشخص')}"
                 except:
-                    ai_analysis = "⚠️ مشکل در پارس کردن نتیجه هوش مصنوعی."
+                    ai_analysis = "⚠️ مشکل در پارس کردن نتیجه هوش مصنوعی Groq."
                 
                 msg = f"🚀 <b>پروژه جدید یافت شد!</b>\n\n"
                 msg += f"📌 <b>ساب‌ردیت:</b> r/{sub}\n"
