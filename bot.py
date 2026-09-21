@@ -25,7 +25,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or env.get("GEMINI_API_KEY", "
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 genai.configure(api_key=GEMINI_API_KEY)
-ai_model = genai.GenerativeModel('gemini-flash-latest')
+ai_model = genai.GenerativeModel('gemini-3.5-flash-lite')
 
 SEEN_FILE = "seen_jobs.txt"
 USERS_FILE = "chat_ids.txt"
@@ -128,8 +128,12 @@ Jobs to analyze:
         return results
     except Exception as e:
         print(f"Batch AI Error: {e}", flush=True)
-        error_msg = str(e).replace("<", "").replace(">", "")[:150]
-        return [{"summary": f"⚠️ ارور در سرور: {error_msg}", "skills": "نامشخص", "budget": "نامشخص"} for _ in jobs]
+        error_msg = str(e).lower()
+        if "quota" in error_msg or "429" in error_msg:
+            friendly_err = "⏳ محدودیت درخواست گوگل! (سقف مجاز پر شده است). لطفاً چند دقیقه دیگر تست کنید."
+        else:
+            friendly_err = f"⚠️ ارور در سرور: {str(e).replace('<', '').replace('>', '')[:100]}"
+        return [{"summary": friendly_err, "skills": "نامشخص", "budget": "نامشخص"} for _ in jobs]
 
 import random
 
