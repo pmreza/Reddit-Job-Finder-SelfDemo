@@ -89,10 +89,10 @@ def send_welcome(message):
 def list_subreddits_cmd(message):
     chat_id = str(message.chat.id)
     save_user(chat_id)
-    msg = "📋 **لیست ساب‌ردیت‌هایی که هم‌اکنون در حال جستجو هستند:**\n\n"
+    msg = "📋 <b>لیست ساب‌ردیت‌هایی که هم‌اکنون در حال جستجو هستند:</b>\n\n"
     for s in SUBREDDITS:
         msg += f"🔹 r/{s}\n"
-    bot.send_message(message.chat.id, msg, parse_mode="Markdown")
+    bot.send_message(message.chat.id, msg, parse_mode="HTML")
 
 @bot.message_handler(func=lambda message: "جستجوی" in message.text)
 def handle_instant_scrape(message):
@@ -173,15 +173,15 @@ def handle_instant_scrape(message):
     for entry, sub, comments in found_entries:
         ai_analysis = analyze_with_ai(entry.title, entry.summary)
         
-        msg = f"🧪 **[جستجوی عمیق]**\n\n"
-        msg += f"📌 **ساب‌ردیت:** r/{sub}\n"
-        msg += f"📅 **تاریخ انتشار:** {entry.published}\n"
-        msg += f"📋 **عنوان:** {entry.title}\n"
-        msg += f"👥 **تعداد رقبا (کامنت‌ها):** {comments} نفر\n\n"
+        msg = f"🧪 <b>[جستجوی عمیق]</b>\n\n"
+        msg += f"📌 <b>ساب‌ردیت:</b> r/{sub}\n"
+        msg += f"📅 <b>تاریخ انتشار:</b> {entry.published}\n"
+        msg += f"📋 <b>عنوان:</b> {entry.title}\n"
+        msg += f"👥 <b>تعداد رقبا (کامنت‌ها):</b> {comments} نفر\n\n"
         msg += f"{ai_analysis}\n\n"
-        msg += f"🔗 **لینک:**\n{entry.link}"
+        msg += f"🔗 <b>لینک:</b>\n{entry.link}"
         try:
-            bot.send_message(chat_id, msg, parse_mode="Markdown", disable_web_page_preview=True)
+            bot.send_message(chat_id, msg, parse_mode="HTML", disable_web_page_preview=True)
             time.sleep(1.5)
         except Exception:
             pass
@@ -206,9 +206,9 @@ def analyze_with_ai(title, description):
     prompt = f"""
 این یک درخواست کار از ردیت است.
 خروجی را دقیقاً با این فرمت بفرست (فقط همین متن را بفرست):
-🔹 **خلاصه کار:** (یک جمله کوتاه درباره نیاز کارفرما)
-🛠 **مهارت‌های مورد نیاز:** (لیست تکنولوژی‌های مهم)
-💰 **بودجه:** (اگر ذکر شده بنویس، وگرنه بنویس 'ذکر نشده')
+🔹 <b>خلاصه کار:</b> (یک جمله کوتاه درباره نیاز کارفرما)
+🛠 <b>مهارت‌های مورد نیاز:</b> (لیست تکنولوژی‌های مهم)
+💰 <b>بودجه:</b> (اگر ذکر شده بنویس، وگرنه بنویس 'ذکر نشده')
 
 Title: {title}
 Description: {description}
@@ -257,17 +257,17 @@ def check_reddit_jobs():
                         
                         pub_date = getattr(entry, 'published', 'نامشخص')
                         
-                        msg = f"🚀 **پروژه جدید یافت شد!**\n\n"
-                        msg += f"📌 **ساب‌ردیت:** r/{sub}\n"
-                        msg += f"📅 **تاریخ:** {pub_date}\n"
-                        msg += f"📋 **عنوان:** {entry.title}\n"
-                        msg += f"👥 **تعداد رقبا (کامنت‌ها):** {comments} نفر\n\n"
+                        msg = f"🚀 <b>پروژه جدید یافت شد!</b>\n\n"
+                        msg += f"📌 <b>ساب‌ردیت:</b> r/{sub}\n"
+                        msg += f"📅 <b>تاریخ:</b> {pub_date}\n"
+                        msg += f"📋 <b>عنوان:</b> {entry.title}\n"
+                        msg += f"👥 <b>تعداد رقبا (کامنت‌ها):</b> {comments} نفر\n\n"
                         msg += f"{ai_analysis}\n\n"
-                        msg += f"🔗 **لینک:**\n{entry.link}"
+                        msg += f"🔗 <b>لینک:</b>\n{entry.link}"
                         
                         for chat_id in users:
                             try:
-                                bot.send_message(chat_id, msg, parse_mode="Markdown", disable_web_page_preview=True)
+                                bot.send_message(chat_id, msg, parse_mode="HTML", disable_web_page_preview=True)
                             except Exception:
                                 pass
                                 
