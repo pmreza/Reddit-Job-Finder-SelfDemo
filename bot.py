@@ -6,6 +6,7 @@ import requests
 import feedparser
 import telebot
 import google.generativeai as genai
+import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 def load_env():
@@ -79,13 +80,15 @@ def send_welcome(message):
     bot.send_message(
         chat_id,
         "سلام! 👋 به ربات هوشمند کاریابی ردیت خوش آمدید.\n\n"
-        "این ربات به صورت خودکار پست‌های استخدامی ردیت در زمینه‌های توسعه وب، اپلیکیشن و طراحی UI/UX را مانیتور می‌کند و پروژه‌های جدید را با استفاده از هوش مصنوعی برای شما تحلیل می‌کند.\n\n"
+        "این ربات به صورت خودکار پست‌های استخدامی را مانیتور می‌کند و پروژه‌های جدید را با استفاده از هوش مصنوعی برای شما تحلیل می‌کند.\n\n"
         "از دکمه‌های پایین استفاده کنید:",
         reply_markup=get_main_keyboard()
     )
 
-@bot.message_handler(func=lambda message: message.text == "📋 ساب‌ردیت‌های تحت نظر")
+@bot.message_handler(func=lambda message: "تحت نظر" in message.text or "لیست" in message.text)
 def list_subreddits_cmd(message):
+    chat_id = str(message.chat.id)
+    save_user(chat_id)
     msg = "📋 **لیست ساب‌ردیت‌هایی که هم‌اکنون در حال جستجو هستند:**\n\n"
     for s in SUBREDDITS:
         msg += f"🔹 r/{s}\n"
@@ -95,9 +98,9 @@ def list_subreddits_cmd(message):
 def handle_instant_scrape(message):
     chat_id = str(message.chat.id)
     save_user(chat_id)
-    bot.send_message(chat_id, "در حال جستجوی عمیق در ردیت برای پیدا کردن ۱۰ پست مرتبط با تخصص‌های شما... (این کار ممکن است کمی طول بکشد) ⏳", reply_markup=get_main_keyboard())
+    bot.send_message(chat_id, "🔍 در حال شخم زدن ساب‌ردیت‌ها برای یافتن دقیقاً ۱۰ پروژه مرتبط... (ممکن است چند ثانیه تا یک دقیقه طول بکشد) ⏳", reply_markup=get_main_keyboard())
     
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 RedditJobBot/1.0'}
     found_entries = []
     
     for sub in SUBREDDITS:
@@ -105,50 +108,74 @@ def handle_instant_scrape(message):
             break
             
         url = f"https://www.reddit.com/r/{sub}/new.json?limit=100"
-        try:
-            res = requests.get(url, headers=headers, timeout=10)
-            if res.status_code == 200:
-                data = res.json()
-                posts = data.get('data', {}).get('children', [])
-                for post in posts:
-                    if len(found_entries) >= 10:
-                        break
-                        
-                    post_data = post.get('data', {})
-                    title = post_data.get('title', '').lower()
-                    desc = post_data.get('selftext', '').lower()
+        after = None
+        
+        for _ in range(3):
+            if len(found_entries) >= 10:
+                break
+            
+            fetch_url = url
+            if after:
+                fetch_url += f"&after={after}"
+                
+            try:
+                res = requests.get(fetch_url, headers=headers, timeout=10)
+                if res.status_code == 200:
+                    data = res.json()
+                    posts = data.get('data', {}).get('children', [])
+                    after = data.get('data', {}).get('after')
                     
-                    if '[for hire]' in title or '[offer]' in title:
-                        continue
+                    for post in posts:
+                        if len(found_entries) >= 10:
+                            break
+                            
+                        post_data = post.get('data', {})
+                        title = post_data.get('title', '').lower()
+                        desc = post_data.get('selftext', '').lower()
                         
-                    search_text = title + " " + desc
-                    if any(kw in search_text for kw in KEYWORDS):
-                        class MockEntry:
-                            def __init__(self, t, d, l):
-                                self.title = t
-                                self.summary = d
-                                self.link = l
-                        
-                        entry = MockEntry(
-                            post_data.get('title', ''),
-                            post_data.get('selftext', ''),
-                            "https://www.reddit.com" + post_data.get('permalink', '')
-                        )
-                        found_entries.append((entry, sub, post_data.get('num_comments', 0)))
-        except Exception as e:
-            print(f"Error fetching {sub}: {e}")
+                        if '[for hire]' in title or '[offer]' in title:
+                            continue
+                            
+                        search_text = title + " " + desc
+                        if any(kw in search_text for kw in KEYWORDS):
+                            created_utc = post_data.get('created_utc', 0)
+                            date_str = datetime.datetime.utcfromtimestamp(created_utc).strftime('%Y-%m-%d %H:%M UTC')
+                            
+                            class MockEntry:
+                                def __init__(self, t, d, l, c):
+                                    self.title = t
+                                    self.summary = d
+                                    self.link = l
+                                    self.published = c
+                            
+                            entry = MockEntry(
+                                post_data.get('title', ''),
+                                post_data.get('selftext', ''),
+                                "https://www.reddit.com" + post_data.get('permalink', ''),
+                                date_str
+                            )
+                            found_entries.append((entry, sub, post_data.get('num_comments', 0)))
+                            
+                    if not after:
+                        break
+                else:
+                    break
+            except Exception as e:
+                print(f"Error fetching {sub}: {e}")
+                break
 
     if not found_entries:
-        bot.send_message(chat_id, "حتی در ۱۰۰ پست اخیر ساب‌ردیت‌ها هم پروژه مرتبطی با تخصص شما یافت نشد! 😔")
+        bot.send_message(chat_id, "حتی در صدها پست اخیر ساب‌ردیت‌ها هم پروژه مرتبطی با تخصص شما یافت نشد! 😔 (ممکن است سرور ردیت دسترسی را موقتاً محدود کرده باشد)")
         return
 
-    bot.send_message(chat_id, f"✅ تعداد {len(found_entries)} پست مرتبط پیدا شد. در حال تحلیل توسط هوش مصنوعی...")
+    bot.send_message(chat_id, f"✅ تعداد {len(found_entries)} پست کاملاً مرتبط پیدا شد. در حال استخراج جزئیات با هوش مصنوعی...")
     
     for entry, sub, comments in found_entries:
         ai_analysis = analyze_with_ai(entry.title, entry.summary)
         
         msg = f"🧪 **[جستجوی عمیق]**\n\n"
         msg += f"📌 **ساب‌ردیت:** r/{sub}\n"
+        msg += f"📅 **تاریخ انتشار:** {entry.published}\n"
         msg += f"📋 **عنوان:** {entry.title}\n"
         msg += f"👥 **تعداد رقبا (کامنت‌ها):** {comments} نفر\n\n"
         msg += f"{ai_analysis}\n\n"
@@ -165,7 +192,7 @@ def get_comment_count(post_url):
     else:
         json_url = post_url
         
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 RedditJobBot/1.0'}
     try:
         res = requests.get(json_url, headers=headers, timeout=5)
         if res.status_code == 200:
@@ -200,7 +227,7 @@ def check_reddit_jobs():
             continue
             
         seen_jobs = load_seen_jobs()
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 RedditJobBot/1.0'}
         
         for sub in SUBREDDITS:
             url = f"https://www.reddit.com/r/{sub}/new.rss"
@@ -228,8 +255,11 @@ def check_reddit_jobs():
                         comments = get_comment_count(entry.link)
                         ai_analysis = analyze_with_ai(entry.title, entry.summary)
                         
+                        pub_date = getattr(entry, 'published', 'نامشخص')
+                        
                         msg = f"🚀 **پروژه جدید یافت شد!**\n\n"
                         msg += f"📌 **ساب‌ردیت:** r/{sub}\n"
+                        msg += f"📅 **تاریخ:** {pub_date}\n"
                         msg += f"📋 **عنوان:** {entry.title}\n"
                         msg += f"👥 **تعداد رقبا (کامنت‌ها):** {comments} نفر\n\n"
                         msg += f"{ai_analysis}\n\n"
