@@ -20,8 +20,8 @@ def load_env():
     return env_vars
 
 env = load_env()
-TELEGRAM_TOKEN = env.get("TELEGRAM_TOKEN", "")
-GEMINI_API_KEY = env.get("GEMINI_API_KEY", "")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN") or env.get("TELEGRAM_TOKEN", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or env.get("GEMINI_API_KEY", "")
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 genai.configure(api_key=GEMINI_API_KEY)
