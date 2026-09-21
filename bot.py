@@ -128,7 +128,8 @@ Jobs to analyze:
         return results
     except Exception as e:
         print(f"Batch AI Error: {e}", flush=True)
-        return [{"summary": "⚠️ مشکل در هوش مصنوعی", "skills": "نامشخص", "budget": "نامشخص"} for _ in jobs]
+        error_msg = str(e).replace("<", "").replace(">", "")[:150]
+        return [{"summary": f"⚠️ ارور در سرور: {error_msg}", "skills": "نامشخص", "budget": "نامشخص"} for _ in jobs]
 
 import random
 
