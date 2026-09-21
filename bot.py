@@ -197,6 +197,8 @@ def handle_instant_scrape(message):
         except Exception:
             pass
 
+import html
+
 @bot.callback_query_handler(func=lambda call: call.data == "generate_cover_letter")
 def handle_cover_letter(call):
     bot.answer_callback_query(call.id, "در حال نوشتن پیام... ⏳")
@@ -210,7 +212,7 @@ def handle_cover_letter(call):
 نکات مهم:
 - پیام باید نهایتاً ۳ پاراگراف کوتاه باشد.
 - مستقیم سر اصل مطلب بروید و نشان دهید که مشکلشان را می‌فهمید.
-- جای خالی برای قرار دادن لینک پورتفولیو در متن بگذارید مانند [Link to my portfolio/website].
+- جای خالی برای قرار دادن لینک پورتفولیو در متن بگذارید مانند [Link to my portfolio]. از کاراکترهای < یا > استفاده نکنید.
 - لحن: حرفه‌ای، بااعتمادبه‌نفس و دوستانه.
 
 این اطلاعات آگهی است که کاربر برای آن درخواست می‌دهد:
@@ -219,12 +221,17 @@ def handle_cover_letter(call):
     try:
         response = ai_model.generate_content(prompt)
         cover_letter = response.text.strip()
+        safe_cover_letter = html.escape(cover_letter)
         
-        reply_text = f"✉️ <b>کاورلتر آماده برای ارسال:</b>\n\n<code>{cover_letter}</code>\n\n(متن بالا را کپی کنید، لینک‌های خودتان را جایگزین کنید و برای کارفرما بفرستید)"
+        reply_text = f"✉️ <b>کاورلتر آماده برای ارسال:</b>\n\n<code>{safe_cover_letter}</code>\n\n(متن بالا را کپی کنید، لینک‌های خودتان را جایگزین کنید و برای کارفرما بفرستید)"
         bot.edit_message_text(reply_text, chat_id=call.message.chat.id, message_id=processing_msg.message_id, parse_mode="HTML")
     except Exception as e:
-        print(f"Gemini error in cover letter: {e}", flush=True)
-        bot.edit_message_text("⚠️ متاسفانه در ارتباط با هوش مصنوعی مشکلی پیش آمد.", chat_id=call.message.chat.id, message_id=processing_msg.message_id)
+        error_msg = str(e)
+        print(f"Gemini error in cover letter: {error_msg}", flush=True)
+        if "429" in error_msg or "Quota" in error_msg:
+            bot.edit_message_text("⏳ <b>گوگل به دلیل درخواست‌های پشت‌سرهم، دسترسی را موقتاً محدود کرده است (فقط 5 درخواست در دقیقه مجاز است).</b>\nلطفاً ۳۰ ثانیه دیگر دوباره امتحان کنید.", chat_id=call.message.chat.id, message_id=processing_msg.message_id, parse_mode="HTML")
+        else:
+            bot.edit_message_text("⚠️ متاسفانه در ارتباط با هوش مصنوعی مشکلی پیش آمد.", chat_id=call.message.chat.id, message_id=processing_msg.message_id)
 
 def check_reddit_jobs():
     while True:
