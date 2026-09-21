@@ -106,72 +106,37 @@ def handle_instant_scrape(message):
     save_user(chat_id)
     bot.send_message(chat_id, "🔍 در حال شخم زدن ساب‌ردیت‌ها برای یافتن دقیقاً ۱۰ پروژه مرتبط... (ممکن است چند ثانیه تا یک دقیقه طول بکشد) ⏳", reply_markup=get_main_keyboard())
     
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 RedditJobBot/1.0'}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'}
     found_entries = []
     
     for sub in SUBREDDITS:
         if len(found_entries) >= 10:
             break
             
-        url = f"https://www.reddit.com/r/{sub}/new.json?limit=100"
-        after = None
+        url = f"https://www.reddit.com/r/{sub}/new.rss"
         
-        for _ in range(3):
-            if len(found_entries) >= 10:
-                break
-            
-            fetch_url = url
-            if after:
-                fetch_url += f"&after={after}"
-                
-            try:
-                res = requests.get(fetch_url, headers=headers, timeout=10)
-                if res.status_code == 200:
-                    data = res.json()
-                    posts = data.get('data', {}).get('children', [])
-                    after = data.get('data', {}).get('after')
-                    
-                    for post in posts:
-                        if len(found_entries) >= 10:
-                            break
-                            
-                        post_data = post.get('data', {})
-                        title = post_data.get('title', '').lower()
-                        desc = post_data.get('selftext', '').lower()
-                        
-                        if '[for hire]' in title or '[offer]' in title:
-                            continue
-                            
-                        search_text = title + " " + desc
-                        if any(kw in search_text for kw in KEYWORDS):
-                            created_utc = post_data.get('created_utc', 0)
-                            date_str = datetime.datetime.utcfromtimestamp(created_utc).strftime('%Y-%m-%d %H:%M UTC')
-                            
-                            class MockEntry:
-                                def __init__(self, t, d, l, c):
-                                    self.title = t
-                                    self.summary = d
-                                    self.link = l
-                                    self.published = c
-                            
-                            entry = MockEntry(
-                                post_data.get('title', ''),
-                                post_data.get('selftext', ''),
-                                "https://www.reddit.com" + post_data.get('permalink', ''),
-                                date_str
-                            )
-                            found_entries.append((entry, sub, post_data.get('num_comments', 0)))
-                            
-                    if not after:
+        try:
+            res = requests.get(url, headers=headers, timeout=10)
+            if res.status_code == 200:
+                feed = feedparser.parse(res.text)
+                for entry in feed.entries:
+                    if len(found_entries) >= 10:
                         break
-                else:
-                    break
-            except Exception as e:
-                print(f"Error fetching {sub}: {e}")
-                break
+                        
+                    title = entry.title.lower()
+                    desc = entry.summary.lower()
+                    
+                    if '[for hire]' in title or '[offer]' in title:
+                        continue
+                        
+                    search_text = title + " " + desc
+                    if any(kw in search_text for kw in KEYWORDS):
+                        found_entries.append((entry, sub, "نامشخص"))
+        except Exception as e:
+            print(f"Error fetching {sub}: {e}")
 
     if not found_entries:
-        bot.send_message(chat_id, "حتی در صدها پست اخیر ساب‌ردیت‌ها هم پروژه مرتبطی با تخصص شما یافت نشد! 😔 (ممکن است سرور ردیت دسترسی را موقتاً محدود کرده باشد)")
+        bot.send_message(chat_id, "حتی در صدها پست اخیر ساب‌ردیت‌ها هم پروژه مرتبطی با تخصص شما یافت نشد! 😔")
         return
 
     bot.send_message(chat_id, f"✅ تعداد {len(found_entries)} پست کاملاً مرتبط پیدا شد. در حال استخراج جزئیات با هوش مصنوعی...")
@@ -179,9 +144,11 @@ def handle_instant_scrape(message):
     for entry, sub, comments in found_entries:
         ai_analysis = analyze_with_ai(entry.title, entry.summary)
         
+        pub_date = getattr(entry, 'published', 'نامشخص')
+        
         msg = f"🧪 <b>[جستجوی عمیق]</b>\n\n"
         msg += f"📌 <b>ساب‌ردیت:</b> r/{sub}\n"
-        msg += f"📅 <b>تاریخ انتشار:</b> {entry.published}\n"
+        msg += f"📅 <b>تاریخ انتشار:</b> {pub_date}\n"
         msg += f"📋 <b>عنوان:</b> {entry.title}\n"
         msg += f"👥 <b>تعداد رقبا (کامنت‌ها):</b> {comments} نفر\n\n"
         msg += f"{ai_analysis}\n\n"
@@ -227,7 +194,7 @@ def get_comment_count(post_url):
     else:
         json_url = post_url
         
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 RedditJobBot/1.0'}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'}
     try:
         res = requests.get(json_url, headers=headers, timeout=5)
         if res.status_code == 200:
@@ -249,7 +216,6 @@ Title: {title}
 Description: {description}
 """
     try:
-        # Prevent Gemini Rate limits when analyzing multiple jobs fast
         time.sleep(1)
         response = ai_model.generate_content(prompt)
         return response.text.strip()
@@ -265,7 +231,7 @@ def check_reddit_jobs():
             continue
             
         seen_jobs = load_seen_jobs()
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 RedditJobBot/1.0'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'}
         
         for sub in SUBREDDITS:
             url = f"https://www.reddit.com/r/{sub}/new.rss"
