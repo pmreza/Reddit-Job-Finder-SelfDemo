@@ -69,7 +69,7 @@ def save_seen_job(job_id):
 
 def get_main_keyboard():
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("🔍 جستجوی پروژه‌های جدید (۱۰ مورد)")
+    markup.row("🔍 جستجوی پروژه‌های جدید (۵ مورد)")
     markup.row("📋 ساب‌ردیت‌های تحت نظر")
     return markup
 
@@ -104,13 +104,13 @@ def list_subreddits_cmd(message):
 def handle_instant_scrape(message):
     chat_id = str(message.chat.id)
     save_user(chat_id)
-    bot.send_message(chat_id, "🔍 در حال شخم زدن ساب‌ردیت‌ها برای یافتن دقیقاً ۱۰ پروژه مرتبط... (ممکن است چند ثانیه تا یک دقیقه طول بکشد) ⏳", reply_markup=get_main_keyboard())
+    bot.send_message(chat_id, "🔍 در حال شخم زدن ساب‌ردیت‌ها برای یافتن دقیقاً ۵ پروژه مرتبط... (ممکن است چند ثانیه طول بکشد) ⏳", reply_markup=get_main_keyboard())
     
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'}
     found_entries = []
     
     for sub in SUBREDDITS:
-        if len(found_entries) >= 10:
+        if len(found_entries) >= 5:
             break
             
         url = f"https://www.reddit.com/r/{sub}/new.rss"
@@ -120,7 +120,7 @@ def handle_instant_scrape(message):
             if res.status_code == 200:
                 feed = feedparser.parse(res.text)
                 for entry in feed.entries:
-                    if len(found_entries) >= 10:
+                    if len(found_entries) >= 5:
                         break
                         
                     title = entry.title.lower()
