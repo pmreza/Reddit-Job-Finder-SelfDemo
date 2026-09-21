@@ -162,10 +162,10 @@ def step_add_sub(message):
     process_add_sub_string(message.chat.id, message.text)
     bot.send_message(message.chat.id, "بازگشت به منوی اصلی", reply_markup=get_main_keyboard())
 
-@bot.message_handler(func=lambda message: message.text == "🔍 جستجوی فوری (۳ پست آخر)")
+@bot.message_handler(func=lambda message: "جستجوی فوری" in message.text)
 def handle_instant_scrape(message):
     chat_id = str(message.chat.id)
-    bot.send_message(chat_id, "در حال جستجو و تحلیل ۳ پست مرتبط اخیر... (چند ثانیه زمان می‌برد) ⏳", reply_markup=get_main_keyboard())
+    bot.send_message(chat_id, "در حال جستجوی عمیق برای پیدا کردن ۱۰ پست مرتبط... (این کار ممکن است کمی طول بکشد) ⏳", reply_markup=get_main_keyboard())
     
     db = load_db()
     category = db.get(chat_id, "frontend")
@@ -177,33 +177,54 @@ def handle_instant_scrape(message):
     found_entries = []
     
     for sub in current_subs:
-        url = f"https://www.reddit.com/r/{sub}/new.rss"
+        if len(found_entries) >= 10:
+            break
+            
+        url = f"https://www.reddit.com/r/{sub}/new.json?limit=100"
         try:
             res = requests.get(url, headers=headers, timeout=10)
             if res.status_code == 200:
-                feed = feedparser.parse(res.text)
-                for entry in feed.entries:
-                    title = entry.title.lower()
-                    desc = entry.summary.lower()
+                data = res.json()
+                posts = data.get('data', {}).get('children', [])
+                for post in posts:
+                    if len(found_entries) >= 10:
+                        break
+                        
+                    post_data = post.get('data', {})
+                    title = post_data.get('title', '').lower()
+                    desc = post_data.get('selftext', '').lower()
+                    
                     if '[for hire]' in title or '[offer]' in title:
                         continue
+                        
                     search_text = title + " " + desc
                     if any(kw in search_text for kw in keywords):
-                        found_entries.append((entry, sub))
-        except Exception:
-            pass
+                        # Construct a mock entry object to match previous logic
+                        class MockEntry:
+                            def __init__(self, t, d, l):
+                                self.title = t
+                                self.summary = d
+                                self.link = l
+                        
+                        entry = MockEntry(
+                            post_data.get('title', ''),
+                            post_data.get('selftext', ''),
+                            "https://www.reddit.com" + post_data.get('permalink', '')
+                        )
+                        found_entries.append((entry, sub, post_data.get('num_comments', 0)))
+        except Exception as e:
+            print(f"Error fetching {sub}: {e}")
 
     if not found_entries:
-        bot.send_message(chat_id, "پروژه مرتبطی در پست‌های اخیر یافت نشد.")
+        bot.send_message(chat_id, "حتی در ۱۰۰ پست اخیر ساب‌ردیت‌ها هم پروژه مرتبطی با تخصص شما یافت نشد! 😔")
         return
 
-    found_entries = found_entries[:3]
+    bot.send_message(chat_id, f"✅ تعداد {len(found_entries)} پست مرتبط پیدا شد. در حال تحلیل توسط هوش مصنوعی...")
     
-    for entry, sub in found_entries:
-        comments = get_comment_count(entry.link)
+    for entry, sub, comments in found_entries:
         ai_analysis = analyze_with_ai(entry.title, entry.summary, category)
         
-        msg = f"🧪 **[جستجوی فوری]**\n\n"
+        msg = f"🧪 **[جستجوی عمیق]**\n\n"
         msg += f"📌 **ساب‌ردیت:** r/{sub}\n"
         msg += f"📋 **عنوان:** {entry.title}\n"
         msg += f"👥 **تعداد رقبا (کامنت‌ها):** {comments} نفر\n\n"
@@ -211,6 +232,7 @@ def handle_instant_scrape(message):
         msg += f"🔗 **لینک:**\n{entry.link}"
         try:
             bot.send_message(chat_id, msg, parse_mode="Markdown", disable_web_page_preview=True)
+            time.sleep(1) # Prevent Telegram rate limits
         except Exception:
             pass
 
