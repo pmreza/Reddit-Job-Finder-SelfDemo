@@ -24,5 +24,8 @@ A smart Telegram bot that monitors specific Subreddits for freelance job opportu
    *   `GEMINI_API_KEY`: Your Google Gemini API Key.
 6. Deploy! Render will automatically update the bot whenever you push new code to the `main` branch.
 
-## 🧪 Testing
-Send `/test` to the bot in Telegram to instantly fetch the latest post from `r/slavelabour` and run it through the AI pipeline.
+## 🧪 Commands
+*   `/start` - Show the interactive UI to choose your specialty.
+*   `/test` - Instantly fetch the latest post from `r/slavelabour` and run it through the AI pipeline.
+*   `/addsub <name>` - Add a new subreddit to the monitoring list (e.g., `/addsub remotejs`).
+*   `/listsubs` - Show the current list of monitored subreddits.

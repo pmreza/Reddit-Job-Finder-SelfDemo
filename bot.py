@@ -144,6 +144,47 @@ def test_system(message):
     except Exception as e:
         bot.send_message(chat_id, "خطا در برقراری ارتباط با سرور ردیت یا هوش مصنوعی.")
 
+SUBS_FILE = "subreddits.json"
+DEFAULT_SUBS = ['slavelabour', 'forhire', 'DoneDirtCheap', 'javascriptjobs']
+
+def load_subs():
+    if not os.path.exists(SUBS_FILE):
+        return DEFAULT_SUBS
+    with open(SUBS_FILE, 'r', encoding='utf-8') as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return DEFAULT_SUBS
+
+def save_subs(subs):
+    with open(SUBS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(subs, f, indent=4)
+
+@bot.message_handler(commands=['addsub'])
+def add_subreddit(message):
+    chat_id = str(message.chat.id)
+    parts = message.text.split()
+    if len(parts) < 2:
+        bot.send_message(chat_id, "⚠️ لطفاً نام ساب‌ردیت را وارد کنید. مثال:\n`/addsub pythonjobs`", parse_mode="Markdown")
+        return
+    
+    new_sub = parts[1].replace('r/', '').strip()
+    subs = load_subs()
+    if new_sub not in subs:
+        subs.append(new_sub)
+        save_subs(subs)
+        bot.send_message(chat_id, f"✅ ساب‌ردیت **r/{new_sub}** با موفقیت به لیست جستجو اضافه شد.", parse_mode="Markdown")
+    else:
+        bot.send_message(chat_id, "این ساب‌ردیت از قبل در لیست وجود دارد.")
+
+@bot.message_handler(commands=['listsubs'])
+def list_subreddits(message):
+    subs = load_subs()
+    msg = "📋 **لیست ساب‌ردیت‌های فعال:**\n\n"
+    for s in subs:
+        msg += f"🔹 r/{s}\n"
+    bot.send_message(message.chat.id, msg, parse_mode="Markdown")
+
 # ----------------- AI & REDDIT FUNCTIONS -----------------
 def get_comment_count(post_url):
     """Fetch comment count directly from public JSON without API key."""
@@ -193,7 +234,8 @@ def check_reddit_jobs():
         seen_jobs = load_seen_jobs()
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 RedditJobMonitor/1.0'}
         
-        for sub in SUBREDDITS:
+        current_subs = load_subs()
+        for sub in current_subs:
             url = f"https://www.reddit.com/r/{sub}/new.rss"
             try:
                 response = requests.get(url, headers=headers)
