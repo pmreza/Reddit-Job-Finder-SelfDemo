@@ -107,6 +107,43 @@ def handle_category_selection(call):
         parse_mode="Markdown"
     )
 
+@bot.message_handler(commands=['test'])
+def test_system(message):
+    chat_id = str(message.chat.id)
+    bot.send_message(chat_id, "در حال تست سیستم: دریافت جدیدترین پست ردیت و تحلیل توسط هوش مصنوعی... (این کار چند ثانیه زمان می‌برد) ⏳")
+    
+    db = load_db()
+    category = db.get(chat_id, "frontend")
+    
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 RedditJobMonitor/1.0'}
+    try:
+        response = requests.get("https://www.reddit.com/r/slavelabour/new.rss", headers=headers)
+        feed = feedparser.parse(response.text)
+        
+        test_entry = None
+        for entry in feed.entries:
+            if '[for hire]' not in entry.title.lower() and '[offer]' not in entry.title.lower():
+                test_entry = entry
+                break
+                
+        if not test_entry and feed.entries:
+            test_entry = feed.entries[0]
+            
+        if test_entry:
+            comments = get_comment_count(test_entry.link)
+            ai_analysis = analyze_with_ai(test_entry.title, test_entry.summary, category)
+            
+            msg = f"🧪 **[پیام تستی]** این نشان می‌دهد سیستم به درستی کار می‌کند!\n\n"
+            msg += f"📌 **ساب‌ردیت:** r/slavelabour\n"
+            msg += f"📋 **عنوان:** {test_entry.title}\n"
+            msg += f"👥 **تعداد رقبا (کامنت‌ها):** {comments} نفر\n\n"
+            msg += f"{ai_analysis}\n\n"
+            msg += f"🔗 **لینک:**\n{test_entry.link}"
+            
+            bot.send_message(chat_id, msg, parse_mode="Markdown", disable_web_page_preview=True)
+    except Exception as e:
+        bot.send_message(chat_id, "خطا در برقراری ارتباط با سرور ردیت یا هوش مصنوعی.")
+
 # ----------------- AI & REDDIT FUNCTIONS -----------------
 def get_comment_count(post_url):
     """Fetch comment count directly from public JSON without API key."""
