@@ -121,7 +121,7 @@ Jobs to analyze:
             "Content-Type": "application/json"
         }
         data = {
-            "model": "llama-3.1-70b-versatile",
+            "model": "openai/gpt-oss-120b",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.2
         }
@@ -271,7 +271,7 @@ def handle_cover_letter(call):
             "Content-Type": "application/json"
         }
         data = {
-            "model": "llama-3.1-70b-versatile",
+            "model": "openai/gpt-oss-120b",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.5
         }
