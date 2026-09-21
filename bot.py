@@ -60,11 +60,11 @@ def save_user(chat_id):
 def load_seen_jobs():
     if not os.path.exists(SEEN_FILE):
         return set()
-    with open(SEEN_FILE, "r") as f:
+    with open(SEEN_FILE, "r", encoding="utf-8") as f:
         return set(line.strip() for line in f if line.strip())
 
 def save_seen_job(job_id):
-    with open(SEEN_FILE, "a") as f:
+    with open(SEEN_FILE, "a", encoding="utf-8") as f:
         f.write(f"{job_id}\n")
 
 def get_main_keyboard():
@@ -100,11 +100,41 @@ def list_subreddits_cmd(message):
         msg += f"🔹 r/{s}\n"
     bot.send_message(message.chat.id, msg, parse_mode="HTML")
 
+def analyze_batch_with_ai(jobs):
+    if not jobs: return []
+    prompt = """You are an AI analyzing job posts. Output ONLY a valid JSON array of objects, one for each job, in the exact same order. Do NOT wrap in markdown blocks like ```json.
+Format of each object:
+{
+  "summary": "یک جمله کوتاه درباره نیاز کارفرما",
+  "skills": "لیست تکنولوژی‌های مهم (مثل React, Python)",
+  "budget": "مبلغ یا 'ذکر نشده'"
+}
+
+Jobs to analyze:
+"""
+    for i, job in enumerate(jobs):
+        prompt += f"--- Job {i} ---\nTitle: {job['title']}\nDesc: {job['desc'][:500]}\n\n"
+        
+    try:
+        response = ai_model.generate_content(prompt)
+        text = response.text.strip()
+        if text.startswith("```json"): text = text[7:-3].strip()
+        if text.startswith("```"): text = text[3:-3].strip()
+        results = json.loads(text)
+        
+        # Ensure we return a list of exactly the same length
+        while len(results) < len(jobs):
+            results.append({"summary": "نامشخص", "skills": "نامشخص", "budget": "نامشخص"})
+        return results
+    except Exception as e:
+        print(f"Batch AI Error: {e}", flush=True)
+        return [{"summary": "⚠️ مشکل در هوش مصنوعی", "skills": "نامشخص", "budget": "نامشخص"} for _ in jobs]
+
 @bot.message_handler(func=lambda message: "جستجوی" in message.text)
 def handle_instant_scrape(message):
     chat_id = str(message.chat.id)
     save_user(chat_id)
-    bot.send_message(chat_id, "🔍 در حال شخم زدن ساب‌ردیت‌ها برای یافتن دقیقاً ۵ پروژه مرتبط... (ممکن است چند ثانیه طول بکشد) ⏳", reply_markup=get_main_keyboard())
+    bot.send_message(chat_id, "🔍 در حال شخم زدن ساب‌ردیت‌ها برای یافتن پروژه‌های مرتبط... ⏳", reply_markup=get_main_keyboard())
     
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'}
     found_entries = []
@@ -114,7 +144,6 @@ def handle_instant_scrape(message):
             break
             
         url = f"https://www.reddit.com/r/{sub}/new.rss"
-        
         try:
             res = requests.get(url, headers=headers, timeout=10)
             if res.status_code == 200:
@@ -131,7 +160,7 @@ def handle_instant_scrape(message):
                         
                     search_text = title + " " + desc
                     if any(kw in search_text for kw in KEYWORDS):
-                        found_entries.append((entry, sub, "نامشخص"))
+                        found_entries.append((entry, sub))
         except Exception as e:
             print(f"Error fetching {sub}: {e}")
 
@@ -139,23 +168,32 @@ def handle_instant_scrape(message):
         bot.send_message(chat_id, "حتی در صدها پست اخیر ساب‌ردیت‌ها هم پروژه مرتبطی با تخصص شما یافت نشد! 😔")
         return
 
-    bot.send_message(chat_id, f"✅ تعداد {len(found_entries)} پست کاملاً مرتبط پیدا شد. در حال استخراج جزئیات با هوش مصنوعی...")
+    bot.send_message(chat_id, f"✅ تعداد {len(found_entries)} پروژه پیدا شد. در حال ارسال یک‌جای همه پروژه‌ها به جمینای برای تحلیلِ دسته‌جمعی... ⚡")
     
-    for entry, sub, comments in found_entries:
-        ai_analysis = analyze_with_ai(entry.title, entry.summary)
-        
+    # Batch AI processing
+    jobs_for_ai = [{"title": e[0].title, "desc": e[0].summary} for e in found_entries]
+    ai_results = analyze_batch_with_ai(jobs_for_ai)
+    
+    for idx, (entry, sub) in enumerate(found_entries):
         pub_date = getattr(entry, 'published', 'نامشخص')
+        
+        # safely get AI result
+        try:
+            ai_data = ai_results[idx]
+            ai_analysis = f"🔹 <b>خلاصه کار:</b> {ai_data.get('summary', 'نامشخص')}\n🛠 <b>مهارت‌های مورد نیاز:</b> {ai_data.get('skills', 'نامشخص')}\n💰 <b>بودجه:</b> {ai_data.get('budget', 'نامشخص')}"
+        except:
+            ai_analysis = "⚠️ مشکل در پارس کردن نتیجه هوش مصنوعی."
         
         msg = f"🧪 <b>[جستجوی عمیق]</b>\n\n"
         msg += f"📌 <b>ساب‌ردیت:</b> r/{sub}\n"
         msg += f"📅 <b>تاریخ انتشار:</b> {pub_date}\n"
-        msg += f"📋 <b>عنوان:</b> {entry.title}\n"
-        msg += f"👥 <b>تعداد رقبا (کامنت‌ها):</b> {comments} نفر\n\n"
+        msg += f"📋 <b>عنوان:</b> {entry.title}\n\n"
         msg += f"{ai_analysis}\n\n"
         msg += f"🔗 <b>لینک:</b>\n{entry.link}"
+        
         try:
             bot.send_message(chat_id, msg, parse_mode="HTML", disable_web_page_preview=True, reply_markup=get_apply_keyboard())
-            time.sleep(1.5)
+            time.sleep(0.5)
         except Exception:
             pass
 
@@ -185,43 +223,8 @@ def handle_cover_letter(call):
         reply_text = f"✉️ <b>کاورلتر آماده برای ارسال:</b>\n\n<code>{cover_letter}</code>\n\n(متن بالا را کپی کنید، لینک‌های خودتان را جایگزین کنید و برای کارفرما بفرستید)"
         bot.edit_message_text(reply_text, chat_id=call.message.chat.id, message_id=processing_msg.message_id, parse_mode="HTML")
     except Exception as e:
-        print(f"Gemini error in cover letter: {e}")
-        bot.edit_message_text("⚠️ متاسفانه در ارتباط با هوش مصنوعی برای نوشتن کاورلتر مشکلی پیش آمد. لطفا چند ثانیه صبر کنید و دوباره تلاش کنید.", chat_id=call.message.chat.id, message_id=processing_msg.message_id)
-
-def get_comment_count(post_url):
-    if not post_url.endswith('.json'):
-        json_url = post_url.rstrip('/') + '/.json'
-    else:
-        json_url = post_url
-        
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'}
-    try:
-        res = requests.get(json_url, headers=headers, timeout=5)
-        if res.status_code == 200:
-            data = res.json()
-            return data[0]['data']['children'][0]['data']['num_comments']
-    except Exception:
-        pass
-    return "نامشخص"
-
-def analyze_with_ai(title, description):
-    prompt = f"""
-این یک درخواست کار از ردیت است.
-خروجی را دقیقاً با این فرمت بفرست (فقط همین متن را بفرست):
-🔹 <b>خلاصه کار:</b> (یک جمله کوتاه درباره نیاز کارفرما)
-🛠 <b>مهارت‌های مورد نیاز:</b> (لیست تکنولوژی‌های مهم)
-💰 <b>بودجه:</b> (اگر ذکر شده بنویس، وگرنه بنویس 'ذکر نشده')
-
-Title: {title}
-Description: {description}
-"""
-    try:
-        time.sleep(4)
-        response = ai_model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        print(f"Gemini Error in analysis: {e}", flush=True)
-        return "⚠️ مشکل در ارتباط با هوش مصنوعی. (ممکن است بخاطر محدودیت درخواست API باشد)"
+        print(f"Gemini error in cover letter: {e}", flush=True)
+        bot.edit_message_text("⚠️ متاسفانه در ارتباط با هوش مصنوعی مشکلی پیش آمد.", chat_id=call.message.chat.id, message_id=processing_msg.message_id)
 
 def check_reddit_jobs():
     while True:
@@ -233,6 +236,7 @@ def check_reddit_jobs():
         seen_jobs = load_seen_jobs()
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'}
         
+        new_entries = []
         for sub in SUBREDDITS:
             url = f"https://www.reddit.com/r/{sub}/new.rss"
             try:
@@ -254,33 +258,39 @@ def check_reddit_jobs():
                         continue
                     
                     search_text = title + " " + desc
-                    
                     if any(kw in search_text for kw in KEYWORDS):
-                        comments = get_comment_count(entry.link)
-                        ai_analysis = analyze_with_ai(entry.title, entry.summary)
+                        new_entries.append((entry, sub))
                         
-                        pub_date = getattr(entry, 'published', 'نامشخص')
-                        
-                        msg = f"🚀 <b>پروژه جدید یافت شد!</b>\n\n"
-                        msg += f"📌 <b>ساب‌ردیت:</b> r/{sub}\n"
-                        msg += f"📅 <b>تاریخ:</b> {pub_date}\n"
-                        msg += f"📋 <b>عنوان:</b> {entry.title}\n"
-                        msg += f"👥 <b>تعداد رقبا (کامنت‌ها):</b> {comments} نفر\n\n"
-                        msg += f"{ai_analysis}\n\n"
-                        msg += f"🔗 <b>لینک:</b>\n{entry.link}"
-                        
-                        for chat_id in users:
-                            try:
-                                bot.send_message(chat_id, msg, parse_mode="HTML", disable_web_page_preview=True, reply_markup=get_apply_keyboard())
-                            except Exception:
-                                pass
-                                
                     seen_jobs.add(job_id)
                     save_seen_job(job_id)
-                        
             except Exception:
                 pass
                 
+        if new_entries:
+            jobs_for_ai = [{"title": e[0].title, "desc": e[0].summary} for e in new_entries]
+            ai_results = analyze_batch_with_ai(jobs_for_ai)
+            
+            for idx, (entry, sub) in enumerate(new_entries):
+                pub_date = getattr(entry, 'published', 'نامشخص')
+                try:
+                    ai_data = ai_results[idx]
+                    ai_analysis = f"🔹 <b>خلاصه کار:</b> {ai_data.get('summary', 'نامشخص')}\n🛠 <b>مهارت‌های مورد نیاز:</b> {ai_data.get('skills', 'نامشخص')}\n💰 <b>بودجه:</b> {ai_data.get('budget', 'نامشخص')}"
+                except:
+                    ai_analysis = "⚠️ مشکل در پارس کردن نتیجه هوش مصنوعی."
+                
+                msg = f"🚀 <b>پروژه جدید یافت شد!</b>\n\n"
+                msg += f"📌 <b>ساب‌ردیت:</b> r/{sub}\n"
+                msg += f"📅 <b>تاریخ:</b> {pub_date}\n"
+                msg += f"📋 <b>عنوان:</b> {entry.title}\n\n"
+                msg += f"{ai_analysis}\n\n"
+                msg += f"🔗 <b>لینک:</b>\n{entry.link}"
+                
+                for chat_id in users:
+                    try:
+                        bot.send_message(chat_id, msg, parse_mode="HTML", disable_web_page_preview=True, reply_markup=get_apply_keyboard())
+                    except Exception:
+                        pass
+        
         time.sleep(5 * 60)
 
 class DummyHandler(BaseHTTPRequestHandler):
