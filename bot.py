@@ -216,11 +216,11 @@ Title: {title}
 Description: {description}
 """
     try:
-        time.sleep(1)
+        time.sleep(4)
         response = ai_model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:
-        print(f"Gemini Error in analysis: {e}")
+        print(f"Gemini Error in analysis: {e}", flush=True)
         return "⚠️ مشکل در ارتباط با هوش مصنوعی. (ممکن است بخاطر محدودیت درخواست API باشد)"
 
 def check_reddit_jobs():
