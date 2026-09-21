@@ -1,14 +1,13 @@
+import os
 import time
+import json
 import threading
 import requests
 import feedparser
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import google.generativeai as genai
-import json
-import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
-# ----------------- CONFIGURATION -----------------
 def load_env():
     env_vars = {}
     if os.path.exists(".env"):
@@ -28,124 +27,43 @@ genai.configure(api_key=GEMINI_API_KEY)
 ai_model = genai.GenerativeModel('gemini-1.5-flash')
 
 DB_FILE = "users_db.json"
-SEEN_JOBS_FILE = "seen_jobs.txt"
+SEEN_FILE = "seen_jobs.txt"
+SUBS_FILE = "subreddits.json"
+DEFAULT_SUBS = ['slavelabour', 'forhire', 'DoneDirtCheap', 'javascriptjobs']
 
-SUBREDDITS = ['slavelabour', 'forhire', 'DoneDirtCheap', 'javascriptjobs']
-
-# Categories and their keywords
 CATEGORIES = {
-    "frontend": ["frontend", "front-end", "react", "vue", "javascript", "js", "css", "html", "web"],
-    "backend": ["backend", "back-end", ".net", "c#", "python", "django", "node", "api", "sql", "database"],
-    "fullstack": ["full stack", "fullstack", "full-stack", "mern", "react", ".net", "django", "web"],
-    "design": ["design", "ui", "ux", "figma", "wordpress", "web design", "elementor"]
+    "frontend": ["react", "vue", "angular", "javascript", "html", "css", "tailwind", "next", "frontend", "front-end"],
+    "backend": ["python", "django", "node", "express", "sql", "postgres", "mongodb", "fastapi", "backend", "back-end", ".net", "c#"],
+    "fullstack": ["fullstack", "full-stack", "mern", "django", "react"],
+    "design": ["figma", "ui", "ux", "design", "photoshop", "illustrator"]
 }
 
-# ----------------- DATABASE FUNCTIONS -----------------
+category_names = {
+    "frontend": "برنامه‌نویسی فرانت‌اند",
+    "backend": "برنامه‌نویسی بک‌اند",
+    "fullstack": "توسعه فول‌استک",
+    "design": "طراحی وب و UI/UX"
+}
+
 def load_db():
     if not os.path.exists(DB_FILE):
         return {}
-    with open(DB_FILE, 'r', encoding='utf-8') as f:
-        try:
-            return json.load(f)
-        except json.JSONDecodeError:
-            return {}
+    with open(DB_FILE, "r") as f:
+        return json.load(f)
 
-def save_db(data):
-    with open(DB_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=4)
+def save_db(db):
+    with open(DB_FILE, "w") as f:
+        json.dump(db, f)
 
 def load_seen_jobs():
-    if not os.path.exists(SEEN_JOBS_FILE):
+    if not os.path.exists(SEEN_FILE):
         return set()
-    with open(SEEN_JOBS_FILE, 'r', encoding='utf-8') as f:
+    with open(SEEN_FILE, "r") as f:
         return set(line.strip() for line in f)
 
 def save_seen_job(job_id):
-    with open(SEEN_JOBS_FILE, 'a', encoding='utf-8') as f:
+    with open(SEEN_FILE, "a") as f:
         f.write(f"{job_id}\n")
-
-# ----------------- TELEGRAM HANDLERS -----------------
-@bot.message_handler(commands=['start', 'menu'])
-def send_welcome(message):
-    chat_id = str(message.chat.id)
-    
-    markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("💻 توسعه فرانت‌اند (Frontend)", callback_data="cat_frontend"))
-    markup.row(InlineKeyboardButton("⚙️ توسعه بک‌اند (Backend)", callback_data="cat_backend"))
-    markup.row(InlineKeyboardButton("🚀 فول‌استک (Full Stack)", callback_data="cat_fullstack"))
-    markup.row(InlineKeyboardButton("🎨 طراحی وب / وردپرس", callback_data="cat_design"))
-    
-    welcome_text = (
-        "سلام! به دستیار هوشمند کاریابی ردیت خوش آمدید 🤖\n\n"
-        "من به طور مداوم سایت ردیت را بررسی می‌کنم و پروژه‌های مناسب را با استفاده از هوش مصنوعی تحلیل می‌کنم.\n\n"
-        "👇 لطفاً حوزه تخصصی که دنبال پروژه‌های آن هستید را انتخاب کنید:"
-    )
-    bot.send_message(chat_id, welcome_text, reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('cat_'))
-def handle_category_selection(call):
-    chat_id = str(call.message.chat.id)
-    category = call.data.replace('cat_', '')
-    
-    db = load_db()
-    db[chat_id] = category
-    save_db(db)
-    
-    category_names = {
-        "frontend": "توسعه فرانت‌اند",
-        "backend": "توسعه بک‌اند",
-        "fullstack": "فول‌استک",
-        "design": "طراحی وب / وردپرس"
-    }
-    
-    bot.answer_callback_query(call.id, "تنظیمات شما ذخیره شد!")
-    bot.edit_message_text(
-        f"✅ تخصص شما روی **{category_names[category]}** تنظیم شد!\n\n"
-        f"از این به بعد، هر پروژه‌ای که در این زمینه منتشر شود، ابتدا توسط هوش مصنوعی (Gemini) تحلیل شده و سپس برای شما ارسال می‌شود. منتظر باشید...",
-        chat_id=chat_id,
-        message_id=call.message.message_id,
-        parse_mode="Markdown"
-    )
-
-@bot.message_handler(commands=['test'])
-def test_system(message):
-    chat_id = str(message.chat.id)
-    bot.send_message(chat_id, "در حال تست سیستم: دریافت جدیدترین پست ردیت و تحلیل توسط هوش مصنوعی... (این کار چند ثانیه زمان می‌برد) ⏳")
-    
-    db = load_db()
-    category = db.get(chat_id, "frontend")
-    
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 RedditJobMonitor/1.0'}
-    try:
-        response = requests.get("https://www.reddit.com/r/slavelabour/new.rss", headers=headers)
-        feed = feedparser.parse(response.text)
-        
-        test_entry = None
-        for entry in feed.entries:
-            if '[for hire]' not in entry.title.lower() and '[offer]' not in entry.title.lower():
-                test_entry = entry
-                break
-                
-        if not test_entry and feed.entries:
-            test_entry = feed.entries[0]
-            
-        if test_entry:
-            comments = get_comment_count(test_entry.link)
-            ai_analysis = analyze_with_ai(test_entry.title, test_entry.summary, category)
-            
-            msg = f"🧪 **[پیام تستی]** این نشان می‌دهد سیستم به درستی کار می‌کند!\n\n"
-            msg += f"📌 **ساب‌ردیت:** r/slavelabour\n"
-            msg += f"📋 **عنوان:** {test_entry.title}\n"
-            msg += f"👥 **تعداد رقبا (کامنت‌ها):** {comments} نفر\n\n"
-            msg += f"{ai_analysis}\n\n"
-            msg += f"🔗 **لینک:**\n{test_entry.link}"
-            
-            bot.send_message(chat_id, msg, parse_mode="Markdown", disable_web_page_preview=True)
-    except Exception as e:
-        bot.send_message(chat_id, "خطا در برقراری ارتباط با سرور ردیت یا هوش مصنوعی.")
-
-SUBS_FILE = "subreddits.json"
-DEFAULT_SUBS = ['slavelabour', 'forhire', 'DoneDirtCheap', 'javascriptjobs']
 
 def load_subs():
     if not os.path.exists(SUBS_FILE):
@@ -160,40 +78,149 @@ def save_subs(subs):
     with open(SUBS_FILE, 'w', encoding='utf-8') as f:
         json.dump(subs, f, indent=4)
 
+def get_main_keyboard():
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row("🔍 جستجوی فوری (۳ پست آخر)")
+    markup.row("➕ افزودن ساب‌ردیت", "📋 لیست ساب‌ردیت‌ها")
+    markup.row("⚙️ تغییر تخصص")
+    return markup
+
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    markup = telebot.types.InlineKeyboardMarkup()
+    for key, name in category_names.items():
+        markup.add(telebot.types.InlineKeyboardButton(name, callback_data=f"cat_{key}"))
+    
+    bot.send_message(
+        message.chat.id,
+        "سلام! 👋 به ربات هوشمند کاریابی ردیت خوش آمدید.\n\n"
+        "لطفاً تخصص خود را از لیست زیر انتخاب کنید:",
+        reply_markup=markup
+    )
+    bot.send_message(
+        message.chat.id,
+        "برای دسترسی سریع به امکانات، از دکمه‌های پایین استفاده کنید:",
+        reply_markup=get_main_keyboard()
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('cat_'))
+def handle_category_selection(call):
+    category = call.data.split('_')[1]
+    chat_id = str(call.message.chat.id)
+    
+    db = load_db()
+    db[chat_id] = category
+    save_db(db)
+    
+    bot.edit_message_text(
+        f"✅ تخصص شما روی **{category_names[category]}** تنظیم شد!",
+        chat_id=chat_id,
+        message_id=call.message.message_id,
+        parse_mode="Markdown"
+    )
+
 @bot.message_handler(commands=['addsub'])
-def add_subreddit(message):
-    chat_id = str(message.chat.id)
+def add_subreddit_cmd(message):
     parts = message.text.split()
     if len(parts) < 2:
-        bot.send_message(chat_id, "⚠️ لطفاً نام ساب‌ردیت را وارد کنید. مثال:\n`/addsub pythonjobs`", parse_mode="Markdown")
+        bot.send_message(message.chat.id, "⚠️ لطفاً نام ساب‌ردیت را بنویسید. مثال:\n`/addsub pythonjobs`", parse_mode="Markdown")
         return
-    
-    new_sub = parts[1].replace('r/', '').strip()
+    process_add_sub_string(message.chat.id, parts[1])
+
+def process_add_sub_string(chat_id, sub_name):
+    new_sub = sub_name.replace('r/', '').strip()
     subs = load_subs()
     if new_sub not in subs:
         subs.append(new_sub)
         save_subs(subs)
-        bot.send_message(chat_id, f"✅ ساب‌ردیت **r/{new_sub}** با موفقیت به لیست جستجو اضافه شد.", parse_mode="Markdown")
+        bot.send_message(chat_id, f"✅ ساب‌ردیت **r/{new_sub}** به لیست جستجو اضافه شد.", parse_mode="Markdown")
     else:
         bot.send_message(chat_id, "این ساب‌ردیت از قبل در لیست وجود دارد.")
 
 @bot.message_handler(commands=['listsubs'])
-def list_subreddits(message):
+def list_subreddits_cmd(message):
     subs = load_subs()
     msg = "📋 **لیست ساب‌ردیت‌های فعال:**\n\n"
     for s in subs:
         msg += f"🔹 r/{s}\n"
     bot.send_message(message.chat.id, msg, parse_mode="Markdown")
 
-# ----------------- AI & REDDIT FUNCTIONS -----------------
+@bot.message_handler(func=lambda message: message.text == "⚙️ تغییر تخصص")
+def btn_change_specialty(message):
+    send_welcome(message)
+
+@bot.message_handler(func=lambda message: message.text == "📋 لیست ساب‌ردیت‌ها")
+def btn_list_subs(message):
+    list_subreddits_cmd(message)
+
+@bot.message_handler(func=lambda message: message.text == "➕ افزودن ساب‌ردیت")
+def btn_add_sub(message):
+    msg = bot.send_message(message.chat.id, "لطفاً نام ساب‌ردیت جدید را تایپ کنید (بدون r/):", reply_markup=telebot.types.ReplyKeyboardRemove())
+    bot.register_next_step_handler(msg, step_add_sub)
+
+def step_add_sub(message):
+    process_add_sub_string(message.chat.id, message.text)
+    bot.send_message(message.chat.id, "بازگشت به منوی اصلی", reply_markup=get_main_keyboard())
+
+@bot.message_handler(func=lambda message: message.text == "🔍 جستجوی فوری (۳ پست آخر)")
+def handle_instant_scrape(message):
+    chat_id = str(message.chat.id)
+    bot.send_message(chat_id, "در حال جستجو و تحلیل ۳ پست مرتبط اخیر... (چند ثانیه زمان می‌برد) ⏳", reply_markup=get_main_keyboard())
+    
+    db = load_db()
+    category = db.get(chat_id, "frontend")
+    keywords = CATEGORIES.get(category, [])
+    
+    current_subs = load_subs()
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    found_entries = []
+    
+    for sub in current_subs:
+        url = f"https://www.reddit.com/r/{sub}/new.rss"
+        try:
+            res = requests.get(url, headers=headers, timeout=10)
+            if res.status_code == 200:
+                feed = feedparser.parse(res.text)
+                for entry in feed.entries:
+                    title = entry.title.lower()
+                    desc = entry.summary.lower()
+                    if '[for hire]' in title or '[offer]' in title:
+                        continue
+                    search_text = title + " " + desc
+                    if any(kw in search_text for kw in keywords):
+                        found_entries.append((entry, sub))
+        except Exception:
+            pass
+
+    if not found_entries:
+        bot.send_message(chat_id, "پروژه مرتبطی در پست‌های اخیر یافت نشد.")
+        return
+
+    found_entries = found_entries[:3]
+    
+    for entry, sub in found_entries:
+        comments = get_comment_count(entry.link)
+        ai_analysis = analyze_with_ai(entry.title, entry.summary, category)
+        
+        msg = f"🧪 **[جستجوی فوری]**\n\n"
+        msg += f"📌 **ساب‌ردیت:** r/{sub}\n"
+        msg += f"📋 **عنوان:** {entry.title}\n"
+        msg += f"👥 **تعداد رقبا (کامنت‌ها):** {comments} نفر\n\n"
+        msg += f"{ai_analysis}\n\n"
+        msg += f"🔗 **لینک:**\n{entry.link}"
+        try:
+            bot.send_message(chat_id, msg, parse_mode="Markdown", disable_web_page_preview=True)
+        except Exception:
+            pass
+
 def get_comment_count(post_url):
-    """Fetch comment count directly from public JSON without API key."""
     if not post_url.endswith('.json'):
         json_url = post_url.rstrip('/') + '/.json'
     else:
         json_url = post_url
         
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 RedditJobMonitor/1.0'}
+    headers = {'User-Agent': 'Mozilla/5.0'}
     try:
         res = requests.get(json_url, headers=headers, timeout=5)
         if res.status_code == 200:
@@ -205,24 +232,20 @@ def get_comment_count(post_url):
 
 def analyze_with_ai(title, description, category):
     prompt = f"""
-تو یک دستیار ارشد کاریابی هستی. یک آگهی کار از سایت ردیت دریافت می‌کنی.
-کاربر من به دنبال پروژه‌های مرتبط با '{category}' است.
-آگهی زیر را بخوان و تحلیل کن:
+این یک درخواست کار از ردیت است.
+خروجی را دقیقاً با این فرمت بفرست (فقط همین متن):
+🔹 **خلاصه کار:** (یک جمله کوتاه)
+🛠 **مهارت‌های مورد نیاز:** (لیست تکنولوژی‌ها)
+💰 **بودجه:** (اگر ذکر شده بنویس، وگرنه بنویس 'ذکر نشده')
+
 Title: {title}
 Description: {description}
-
-لطفاً خروجی را دقیقاً به زبان فارسی و با این فرمت برگردان (فقط همین متن را بده و هیچ چیز اضافه‌ای ننویس):
-
-📝 **تحلیل هوش مصنوعی:** (یک خلاصه ۲ الی ۳ جمله‌ای از اینکه کارفرما دقیقاً چه می‌خواهد و آیا برای این تخصص مناسب است یا نه)
-💡 **مهارت‌های مورد نیاز:** (لیست تکنولوژی‌هایی که خواسته شده یا حدس می‌زنی لازم است)
-💰 **بودجه تخمینی:** (اگر در متن گفته شده بنویس، اگر نه بنویس 'در متن ذکر نشده')
 """
     try:
         response = ai_model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:
-        print(f"AI Error: {e}")
-        return "⚠️ متأسفانه در ارتباط با هوش مصنوعی مشکلی پیش آمد."
+        return "⚠️ مشکل در ارتباط با هوش مصنوعی."
 
 def check_reddit_jobs():
     while True:
@@ -232,7 +255,7 @@ def check_reddit_jobs():
             continue
             
         seen_jobs = load_seen_jobs()
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 RedditJobMonitor/1.0'}
+        headers = {'User-Agent': 'Mozilla/5.0'}
         
         current_subs = load_subs()
         for sub in current_subs:
@@ -241,14 +264,12 @@ def check_reddit_jobs():
                 response = requests.get(url, headers=headers)
                 if response.status_code != 200:
                     continue
-                    
                 feed = feedparser.parse(response.text)
-                
                 for entry in feed.entries:
                     job_id = entry.id
                     if job_id in seen_jobs:
                         continue
-                        
+                    
                     title = entry.title.lower()
                     desc = entry.summary.lower()
                     
@@ -259,63 +280,50 @@ def check_reddit_jobs():
                     
                     search_text = title + " " + desc
                     
-                    # Find which users should get this
                     for chat_id, category in list(db.items()):
                         keywords = CATEGORIES.get(category, [])
                         if any(kw in search_text for kw in keywords):
-                            
-                            # 1. Get comment count (no API key needed!)
                             comments = get_comment_count(entry.link)
-                            
-                            # 2. Analyze with AI
                             ai_analysis = analyze_with_ai(entry.title, entry.summary, category)
                             
-                            # 3. Send message
-                            msg = f"🟢 **پروژه جدید پیدا شد!**\n\n"
+                            msg = f"🚀 **پروژه جدید یافت شد!**\n\n"
                             msg += f"📌 **ساب‌ردیت:** r/{sub}\n"
                             msg += f"📋 **عنوان:** {entry.title}\n"
                             msg += f"👥 **تعداد رقبا (کامنت‌ها):** {comments} نفر\n\n"
                             msg += f"{ai_analysis}\n\n"
-                            msg += f"🔗 **لینک اصلی پروژه:**\n{entry.link}"
+                            msg += f"🔗 **لینک:**\n{entry.link}"
                             
                             try:
                                 bot.send_message(chat_id, msg, parse_mode="Markdown", disable_web_page_preview=True)
-                            except Exception as e:
-                                print(f"Telegram error: {e}")
-                                
-                            break # don't send the same job multiple times to the same user if categories overlap
+                            except Exception:
+                                pass
+                            break
                             
                     seen_jobs.add(job_id)
                     save_seen_job(job_id)
                         
-            except Exception as e:
-                print(f"Error checking {sub}: {e}")
+            except Exception:
+                pass
                 
         time.sleep(5 * 60)
-
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/plain')
         self.end_headers()
-        self.wfile.write(b"Bot is alive and running!")
+        self.wfile.write(b"Bot is alive!")
 
 def run_dummy_server():
     port = int(os.environ.get('PORT', 10000))
     server = HTTPServer(('0.0.0.0', port), DummyHandler)
-    print(f"Dummy web server listening on port {port}")
     server.serve_forever()
 
 if __name__ == "__main__":
-    # Start dummy web server for Render
     web_thread = threading.Thread(target=run_dummy_server, daemon=True)
     web_thread.start()
 
-    # Start reddit checker
     checker_thread = threading.Thread(target=check_reddit_jobs, daemon=True)
     checker_thread.start()
     
-    print("Bot is running with AI capabilities! Waiting for users...")
     bot.infinity_polling()
