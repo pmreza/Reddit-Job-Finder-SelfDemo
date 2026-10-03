@@ -56,7 +56,7 @@ https://www.reddit.com/prefs/apps and set `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SE
 ## ⚙️ Customize (env vars)
 - `SUBREDDITS`: comma-separated list
 - `KEYWORDS`: comma-separated list (replaces the defaults)
-- `CHECK_INTERVAL`: seconds between checks (default 180)
+- `CHECK_INTERVAL`: seconds between checks (default 3600 = 1 hour)
 
 ## Run locally
 ```powershell

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Reddit -> Telegram job alert bot.
 
 Watches hiring subreddits (r/forhire, r/jobbit, ...) and sends you new
@@ -62,8 +62,8 @@ EXCLUDE_RE = re.compile(
 )
 FLAIR_EXCLUDE_RE = re.compile(r"for\s*hire|offer|closed|filled", re.I)
 
-CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "300"))        # seconds
-BOOT_LOOKBACK_MIN = int(os.getenv("BOOT_LOOKBACK_MIN", "60"))   # on start, send posts newer than this
+CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "3600"))       # seconds (1 hour)
+BOOT_LOOKBACK_MIN = int(os.getenv("BOOT_LOOKBACK_MIN", str(max(60, CHECK_INTERVAL // 60))))  # on start, send posts newer than this
 MAX_PER_CYCLE = int(os.getenv("MAX_PER_CYCLE", "15"))
 OWNER_CHAT_IDS = {int(x) for x in env_list("OWNER_CHAT_ID", "") if x.lstrip("-").isdigit()}
 USER_AGENT = os.getenv("USER_AGENT", "python:tg-reddit-jobs-bot:v1.0 (by /u/jobsbot)")
@@ -387,6 +387,11 @@ async def check(context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as e:  # noqa: BLE001
         st.last_error = str(e)[:400]
         log.error("All fetch methods failed: %s", st.last_error)
+        # don't wait a full hour after a failure: retry once after the backoff
+        delay = max(60, int(rd.backoff_until - time.time()) + 5)
+        if delay < CHECK_INTERVAL - 120 and not context.job_queue.get_jobs_by_name("retry"):
+            context.job_queue.run_once(check, delay, name="retry")
+            log.info("Will retry in %ss", delay)
         return
     st.last_check, st.source, st.last_error = time.time(), source, None
 
