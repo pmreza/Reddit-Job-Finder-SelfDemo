@@ -610,6 +610,21 @@ def main() -> None:
         app.add_handler(CommandHandler(name, fn))
 
     app.job_queue.run_repeating(check, interval=CHECK_INTERVAL, first=5)
+    
+    # Self-ping to prevent Render Free Tier from sleeping
+    ext_url = os.getenv("RENDER_EXTERNAL_URL")
+    if ext_url:
+        async def keep_awake(ctx: ContextTypes.DEFAULT_TYPE) -> None:
+            try:
+                # Fire and forget a GET request to our own health endpoint
+                async with httpx.AsyncClient() as client:
+                    await client.get(ext_url, timeout=10)
+            except Exception:
+                pass
+        
+        # Ping every 10 minutes (600 seconds)
+        app.job_queue.run_repeating(keep_awake, interval=600, first=60)
+        log.info("Self-ping enabled to prevent Render from sleeping (URL: %s)", ext_url)
     log.info("Bot starting. Subreddits: %s", ", ".join(SUBREDDITS))
     # Python 3.14+ no longer auto-creates a loop; PTB expects one to exist.
     asyncio.set_event_loop(asyncio.new_event_loop())
