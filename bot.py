@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Reddit -> Telegram job alert bot.
 
 Watches hiring subreddits (r/forhire, r/jobbit, ...) and sends you new
@@ -62,11 +62,15 @@ EXCLUDE_RE = re.compile(
 )
 FLAIR_EXCLUDE_RE = re.compile(r"for\s*hire|offer|closed|filled", re.I)
 
-CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "180"))        # seconds
+CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "300"))        # seconds
 BOOT_LOOKBACK_MIN = int(os.getenv("BOOT_LOOKBACK_MIN", "60"))   # on start, send posts newer than this
 MAX_PER_CYCLE = int(os.getenv("MAX_PER_CYCLE", "15"))
 OWNER_CHAT_IDS = {int(x) for x in env_list("OWNER_CHAT_ID", "") if x.lstrip("-").isdigit()}
 USER_AGENT = os.getenv("USER_AGENT", "python:tg-reddit-jobs-bot:v1.0 (by /u/jobsbot)")
+BROWSER_UA = os.getenv(
+    "BROWSER_UA",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
+)
 
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
@@ -131,13 +135,15 @@ class State:
 
 # ----------------------------------------------------------------- reddit
 class Reddit:
-    """Fetches newest posts. Tries OAuth (if configured) -> JSON -> RSS."""
+    """Fetches newest posts. OAuth (if configured) or RSS first; public JSON last; backs off on 429."""
 
     def __init__(self) -> None:
         self.client = httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, timeout=20, follow_redirects=True)
         self.token: str | None = None
         self.token_exp = 0.0
         self.preferred: str | None = None
+        self.backoff_until = 0.0
+        self.fail_streak = 0
 
     @staticmethod
     def _from_json(j: dict) -> list[dict]:
@@ -185,8 +191,12 @@ class Reddit:
         r.raise_for_status()
         return self._from_json(r.json())
 
-    async def fetch_rss(self, multi: str) -> list[dict]:
-        r = await self.client.get(f"https://www.reddit.com/r/{multi}/new/.rss", params={"limit": 100})
+    async def _rss(self, host: str, multi: str) -> list[dict]:
+        r = await self.client.get(
+            f"https://{host}/r/{multi}/new/.rss",
+            params={"limit": 100},
+            headers={"User-Agent": BROWSER_UA, "Accept": "application/atom+xml,application/xml;q=0.9,*/*;q=0.8"},
+        )
         r.raise_for_status()
         feed = feedparser.parse(r.text)
         posts = []
@@ -208,24 +218,50 @@ class Reddit:
             })
         return posts
 
+    async def fetch_rss(self, multi: str) -> list[dict]:
+        return await self._rss("www.reddit.com", multi)
+
+    async def fetch_rss_old(self, multi: str) -> list[dict]:
+        return await self._rss("old.reddit.com", multi)
+
     async def fetch(self) -> tuple[str, list[dict]]:
+        if time.time() < self.backoff_until:
+            raise RuntimeError(f"rate-limited by Reddit, waiting {int(self.backoff_until - time.time())}s")
         multi = "+".join(SUBREDDITS)
-        methods = []
         if REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET:
-            methods.append(("oauth", self.fetch_oauth))
-        methods += [("json", self.fetch_json), ("rss", self.fetch_rss)]
+            methods = [("oauth", self.fetch_oauth), ("rss", self.fetch_rss)]
+        else:
+            # public JSON is almost always 403 from cloud IPs -> try it last
+            methods = [("rss", self.fetch_rss), ("rss-old", self.fetch_rss_old), ("json", self.fetch_json)]
         if self.preferred:  # try last working method first
             methods.sort(key=lambda m: m[0] != self.preferred)
         errors = []
+        retry_after = 0
         for name, fn in methods:
             try:
                 posts = await fn(multi)
                 self.preferred = name
+                self.fail_streak = 0
                 return name, posts
+            except httpx.HTTPStatusError as e:
+                code = e.response.status_code
+                errors.append(f"{name}: HTTP {code}")
+                log.warning("Fetch via %s failed: HTTP %s", name, code)
+                if code == 429:
+                    h = e.response.headers
+                    try:
+                        retry_after = max(retry_after, int(float(h.get("retry-after") or h.get("x-ratelimit-reset") or 0)))
+                    except ValueError:
+                        pass
             except Exception as e:  # noqa: BLE001
                 errors.append(f"{name}: {e}")
                 log.warning("Fetch via %s failed: %s", name, e)
-        raise RuntimeError(" | ".join(errors))
+            await asyncio.sleep(2)
+        # everything failed -> exponential backoff (max 30 min)
+        self.fail_streak += 1
+        wait = max(retry_after, min(1800, 60 * 2 ** (self.fail_streak - 1)))
+        self.backoff_until = time.time() + wait
+        raise RuntimeError(" | ".join(errors) + f" -> backing off {wait}s")
 
 
 # ---------------------------------------------------------------- filters
