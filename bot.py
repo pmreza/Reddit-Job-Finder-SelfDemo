@@ -570,6 +570,8 @@ def main() -> None:
 
     app.job_queue.run_repeating(check, interval=CHECK_INTERVAL, first=5)
     log.info("Bot starting. Subreddits: %s", ", ".join(SUBREDDITS))
+    # Python 3.14+ no longer auto-creates a loop; PTB expects one to exist.
+    asyncio.set_event_loop(asyncio.new_event_loop())
     app.run_polling(drop_pending_updates=True)
 
 
