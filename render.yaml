@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: reddit-jobs-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: OWNER_CHAT_ID
+        sync: false
+      - key: AI_API_KEY
+        sync: false
